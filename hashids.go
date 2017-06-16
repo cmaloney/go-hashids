@@ -59,6 +59,12 @@ func New() (*HashID, error) {
 	return NewWithData(NewData())
 }
 
+func duplicateRuneSlice(data []rune) []rune {
+	result := make([]rune, len(data))
+	copy(result, data)
+	return result
+}
+
 // NewWithData creates a new HashID with the provided HashIDData
 func NewWithData(data *HashIDData) (*HashID, error) {
 	if len(data.Alphabet) < minAlphabetLength {
@@ -79,8 +85,7 @@ func NewWithData(data *HashIDData) (*HashID, error) {
 	alphabet := []rune(data.Alphabet)
 	salt := []rune(data.Salt)
 
-	seps := make([]rune, len(sepsOriginal))
-	copy(seps, sepsOriginal)
+	seps := duplicateRuneSlice(sepsOriginal)
 
 	// seps should contain only characters present in alphabet; alphabet should not contains seps
 	for i := 0; i < len(seps); i++ {
@@ -98,7 +103,7 @@ func NewWithData(data *HashIDData) (*HashID, error) {
 			alphabet = append(alphabet[:foundIndex], alphabet[foundIndex+1:]...)
 		}
 	}
-	seps = consistentShuffle(seps, salt)
+	consistentShuffleInPlace(seps, salt)
 
 	if len(seps) == 0 || float64(len(alphabet))/float64(len(seps)) > sepDiv {
 		sepsLength := int(math.Ceil(float64(len(alphabet)) / sepDiv))
@@ -113,7 +118,7 @@ func NewWithData(data *HashIDData) (*HashID, error) {
 			seps = seps[:sepsLength]
 		}
 	}
-	alphabet = consistentShuffle(alphabet, salt)
+	consistentShuffleInPlace(alphabet, salt)
 
 	guardCount := int(math.Ceil(float64(len(alphabet)) / guardDiv))
 	var guards []rune
@@ -165,8 +170,7 @@ func (h *HashID) EncodeInt64(numbers []int64) (string, error) {
 		}
 	}
 
-	alphabet := make([]rune, len(h.alphabet))
-	copy(alphabet, h.alphabet)
+	alphabet := duplicateRuneSlice(h.alphabet)
 
 	numbersHash := int64(0)
 	for i, n := range numbers {
@@ -184,7 +188,7 @@ func (h *HashID) EncodeInt64(numbers []int64) (string, error) {
 
 	for i, n := range numbers {
 		buffer := append([]rune{lottery}, append(h.salt, alphabet...)...)
-		alphabet = consistentShuffle(alphabet, buffer[:len(alphabet)])
+		consistentShuffleInPlace(alphabet, buffer[:len(alphabet)])
 		hash := hash(n, maxRuneLength, alphabet)
 		result = append(result, hash...)
 
@@ -206,7 +210,7 @@ func (h *HashID) EncodeInt64(numbers []int64) (string, error) {
 
 	halfLength := len(alphabet) / 2
 	for len(result) < h.minLength {
-		alphabet = consistentShuffle(alphabet, alphabet)
+		consistentShuffleInPlace(alphabet, duplicateRuneSlice(alphabet))
 		result = append(alphabet[halfLength:], append(result, alphabet[:halfLength]...)...)
 		excess := len(result) - h.minLength
 		if excess > 0 {
@@ -276,7 +280,7 @@ func (h *HashID) DecodeInt64WithError(hash string) ([]int64, error) {
 		alphabet := []rune(h.alphabet)
 		for _, subHash := range hashes {
 			buffer := append([]rune{lottery}, append(h.salt, alphabet...)...)
-			alphabet = consistentShuffle(alphabet, buffer[:len(alphabet)])
+			consistentShuffleInPlace(alphabet, buffer[:len(alphabet)])
 			number, err := unhash(subHash, alphabet)
 			if err != nil {
 				return nil, err
@@ -287,7 +291,8 @@ func (h *HashID) DecodeInt64WithError(hash string) ([]int64, error) {
 
 	sanityCheck, _ := h.EncodeInt64(result)
 	if sanityCheck != hash {
-		return result, errors.New("mismatch between encode and decode")
+		return result, fmt.Errorf("mismatch between encode and decode: %s start %s"+
+			" re-encoded. result: %v", hash, sanityCheck, result)
 	}
 
 	return result, nil
@@ -353,19 +358,15 @@ func unhash(input, alphabet []rune) (int64, error) {
 	return result, nil
 }
 
-func consistentShuffle(alphabet, salt []rune) []rune {
+func consistentShuffleInPlace(alphabet, salt []rune) {
 	if len(salt) == 0 {
-		return alphabet
+		return
 	}
 
-	result := make([]rune, len(alphabet))
-	copy(result, alphabet)
-	for i, v, p := len(result)-1, 0, 0; i > 0; i-- {
+	for i, v, p := len(alphabet)-1, 0, 0; i > 0; i-- {
 		p += int(salt[v])
 		j := (int(salt[v]) + v + p) % i
-		result[i], result[j] = result[j], result[i]
+		alphabet[i], alphabet[j] = alphabet[j], alphabet[i]
 		v = (v + 1) % len(salt)
 	}
-
-	return result
 }
